@@ -307,8 +307,8 @@ for res in results:
 
 
 #N_values = [0.01, 0.05, 0.10, 0.20]
-N_values = np.linspace(0.01, 0.8, 100)
-n_x = 4
+N_values = np.linspace(0.01, 0.8, 50)
+n_x = 3
 n_trunc_values = [0,1,2]
 # Attenzione: può richiedere tempo aumentando n_x, n_trunc o il numero di punti.
 
