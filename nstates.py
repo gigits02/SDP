@@ -75,6 +75,7 @@ def canonical_trace_word(w):
     """
     w = reduce_word(tuple(w))
     candidates = rotations(w) + rotations(tuple(reversed(w)))
+    #candidates = rotations(w)
     candidates = [reduce_word(c) for c in candidates]
     return min(candidates)
 
@@ -134,7 +135,6 @@ def build_operators(n_x, n_trunc):
     sigmas = [f"s{n}" for n in range(n_trunc + 1)]
     return rhos, measurements, sigmas
 
-
 def build_words(n_x, n_trunc, include_extra=True):
     rhos, measurements, sigmas = build_operators(n_x, n_trunc)
 
@@ -149,27 +149,26 @@ def build_words(n_x, n_trunc, include_extra=True):
     words += [(r, M) for r in rhos for M in measurements]
     words += [(r, s) for r in rhos for s in sigmas]
     words += [(s, M) for s in sigmas for M in measurements]
-
+    words += [(r, r) for r in rhos]
+    words += [(s, r) for s in sigmas for r in rhos]
+    
     if include_extra:
         # Alcune parole più forti (da usare per n_x > 2)
-        words += [(r, r) for r in rhos]
-        words += [(s, r) for s in sigmas for r in rhos]
         words += [(r, M, s) for r in rhos for M in measurements for s in sigmas]
         words += [(M, r, s) for M in measurements for r in rhos for s in sigmas]
 
-    # Rimuovi duplicati dopo canonizzazione, scartando parole nulle
+    # Applica le regole di proiezione riducendo le parole
     unique = []
     seen = set()
-
     for w in words:
-        key = canonical_trace_word(w)
+        w = reduce_word(tuple(w))
 
-        if is_zero_word(key):
+        if is_zero_word(w):
             continue
 
-        if key not in seen:
-            seen.add(key)
-            unique.append(key)
+        if w not in seen:
+            seen.add(w)
+            unique.append(w)
 
     return unique
 
@@ -184,30 +183,16 @@ def build_localizing_words(n_x, n_trunc):
 
     return words
 
-def prepare_omega(omega, n_x, n_trunc):
-    if np.isscalar(omega):
-        return np.full((n_x, n_trunc + 1), float(omega))
-
-    omega = np.asarray(omega, dtype=float)
-
-    expected_shape = (n_x, n_trunc + 1)
-    if omega.shape != expected_shape:
-        raise ValueError(f"omega deve avere shape {expected_shape}, ricevuto {omega.shape}")
-
-    return omega
-
-
 def solve_n_state_discrimination(n_x, n_trunc, omega, solver="CLARABEL", verbose=False, include_extra_words=True):
     """
     Risolve un rilassamento SDP per discriminazione di n_x stati
     con vincoli sulle componenti fotoniche fino a n_trunc.
     """
-    omega = prepare_omega(omega, n_x, n_trunc)
 
     sdp = TracialSDP()
     rhos, measurements, sigmas = build_operators(n_x, n_trunc)
 
-    words = build_words(n_x, n_trunc, include_extra=include_extra_words)
+    words = build_words(n_x, n_trunc)
     loc_words = build_localizing_words(n_x, n_trunc)
 
     Gamma = sdp.moment_matrix(words)
@@ -229,12 +214,21 @@ def solve_n_state_discrimination(n_x, n_trunc, omega, solver="CLARABEL", verbose
     for x, r in enumerate(rhos):
         for n, s in enumerate(sigmas):
             constraints.append(sdp.T((r, s)) >= 1 - omega[x, n])
+            constraints.append(sdp.T((r, s)) <= 1)
 
-    # Completezza della misura sul supporto degli stati:
-    # sum_b Tr(rho_x M_b) = Tr(rho_x) = 1
-    for r in rhos:
-        constraints.append(sum(sdp.T((r, M)) for M in measurements) == 1)
 
+    # Completezza della POVM: sum_b M_b = I
+    # sum_b Tr(u^dagger M_b v) = Tr(u^dagger v)
+    for u in loc_words:
+        for v in loc_words:
+
+            lhs = sum(
+                sdp.T(tuple(reversed(u)) + (M,) + tuple(v))
+                for M in measurements
+            )
+            rhs = sdp.T(tuple(reversed(u)) + tuple(v))
+            constraints.append(lhs == rhs)
+    
     # Witness di n-state discrimination
     W = sum(sdp.T((rhos[x], measurements[x])) for x in range(n_x)) / n_x
 
@@ -253,15 +247,6 @@ def solve_n_state_discrimination(n_x, n_trunc, omega, solver="CLARABEL", verbose
         "moment_variables": sdp.vars,
     }
 
-
-def analytic_two_state_vacuum(omega):
-    return 0.5 + np.sqrt(omega * (1 - omega))
-
-
-def analytic_three_state_vacuum(omega):
-    return (1 + omega) / 3 + (2 * np.sqrt(2) / 3) * np.sqrt(omega * (1 - omega))
-
-
 def poisson_photon_weights(N, n_trunc):
     return np.array([np.exp(-N) * N**n / math.factorial(n) for n in range(n_trunc + 1)])
 
@@ -276,39 +261,10 @@ def poisson_omega(N, n_x, n_trunc):
 # MAIN
 # =========================
 
-'''
-omegas = [0.01, 0.05, 0.10, 0.25, 0.50]
-results = []
-
-for omega in omegas:
-    res = solve_n_state_discrimination(
-        n_x=3,
-        n_trunc=0,
-        omega=omega,
-        solver="CLARABEL",
-        include_extra_words=True,
-    )
-    analytic = analytic_three_state_vacuum(omega)
-    res["analytic"] = analytic
-    res["absolute_error"] = None if res["sdp_upper_bound"] is None else abs(res["sdp_upper_bound"] - analytic)
-    results.append(res)
-
-for res in results:
-    print(
-        f"omega={res['omega'][0,0]:.3f} | "
-        f"SDP={res['sdp_upper_bound']:.10f} | "
-        f"reference={res['analytic']:.10f} | "
-        f"diff={res['absolute_error']:.2e} | "
-        f"status={res['status']} | "
-        f"vars={res['num_moment_variables']}"
-    )
-
-'''
-
-
-#N_values = [0.01, 0.05, 0.10, 0.20]
-N_values = np.linspace(0.01, 0.8, 50)
-n_x = 3
+N_values = [0.005, 0.1, 0.2, 0.5]
+#N_values = np.linspace(0.01, 2.0, 30)
+n_x = 2
+#n_trunc_values = [0,1,2]
 n_trunc_values = [0,1,2]
 # Attenzione: può richiedere tempo aumentando n_x, n_trunc o il numero di punti.
 
@@ -324,7 +280,7 @@ for n_trunc in n_trunc_values:
             n_x=n_x,
             n_trunc=n_trunc,
             omega=omega,
-            solver="CLARABEL",
+            solver="MOSEK",
             include_extra_words=True,
         )
         sdp_values.append(res["sdp_upper_bound"])
@@ -341,7 +297,7 @@ for n_trunc in n_trunc_values:
 
 plt.xlabel(r"$N$")
 plt.ylabel(r"$W_{3\mathrm{disc}}$")
-plt.title(r"3-state discrimination$")
+plt.title(r"3-state discrimination")
 plt.grid(True)
 plt.legend()
 plt.show()
