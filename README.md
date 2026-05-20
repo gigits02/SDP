@@ -1,5 +1,4 @@
 # SDP Thesis Work
-
 Code for SDP relaxations in SDI CV QRNG prepare and measure scenarios.
 
 ## Setup
