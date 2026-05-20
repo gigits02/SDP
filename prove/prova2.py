@@ -7,7 +7,7 @@ constraints = [
     x + y == 1,
     x >= 0,
     y >= 0
-]
+    ]
 
 objective = cp.Maximize(x)
 

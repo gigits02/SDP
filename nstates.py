@@ -68,10 +68,7 @@ def rotations(w):
 def canonical_trace_word(w):
     """
     Forma canonica di una parola dentro una traccia.
-    Usa:
-    - riduzione M_b^2=M_b e sigma_n^2=sigma_n;
-    - ciclicità della traccia;
-    - equivalenza sotto inversione della parola, assumendo operatori hermitiani.
+    Usa ciclicità della traccia e inversione, assumendo operatori hermitiani.
     """
     w = reduce_word(tuple(w))
     candidates = rotations(w) + rotations(tuple(reversed(w)))
@@ -261,13 +258,10 @@ def poisson_omega(N, n_x, n_trunc):
 # MAIN
 # =========================
 
-N_values = [0.005, 0.1, 0.2, 0.5]
-#N_values = np.linspace(0.01, 2.0, 30)
-n_x = 2
-#n_trunc_values = [0,1,2]
-#n_trunc_values = [0,1,2]
+#N_values = [0.005, 0.1, 0.2, 0.5]
+N_values = np.linspace(0.01, 1.0, 10)
+n_x = 4
 n_trunc_values = [0,1,2]
-# Attenzione: può richiedere tempo aumentando n_x, n_trunc o il numero di punti.
 
 plt.figure(figsize=(7, 5))
 
@@ -297,8 +291,8 @@ for n_trunc in n_trunc_values:
     plt.plot(N_values, sdp_values, "--", label=fr"$n_{{\mathrm{{trunc}}}}={n_trunc}$")
 
 plt.xlabel(r"$N$")
-plt.ylabel(r"$W_{3\mathrm{disc}}$")
-plt.title(r"3-state discrimination")
+plt.ylabel(fr"$W_{{{n_x}\mathrm{{disc}}}}$")
+plt.title(fr"{n_x}-states discrimination")
 plt.grid(True)
 plt.legend()
 plt.show()
