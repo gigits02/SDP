@@ -192,7 +192,7 @@ def solve_n_state_discrimination(n_x, n_trunc, omega, solver="CLARABEL", verbose
     sdp = TracialSDP()
     rhos, measurements, sigmas = build_operators(n_x, n_trunc)
 
-    words = build_words(n_x, n_trunc)
+    words = build_words(n_x, n_trunc, include_extra=include_extra_words)
     loc_words = build_localizing_words(n_x, n_trunc)
 
     Gamma = sdp.moment_matrix(words)
@@ -264,6 +264,7 @@ def poisson_omega(N, n_x, n_trunc):
 N_values = [0.005, 0.1, 0.2, 0.5]
 #N_values = np.linspace(0.01, 2.0, 30)
 n_x = 2
+#n_trunc_values = [0,1,2]
 #n_trunc_values = [0,1,2]
 n_trunc_values = [0,1,2]
 # Attenzione: può richiedere tempo aumentando n_x, n_trunc o il numero di punti.

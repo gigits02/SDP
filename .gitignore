@@ -1,4 +1,7 @@
-.venv/
-cherubino.png
-notes.py
-prove/
+.env
+graphs
+minEntropy.py
+shannon.py
+prova1.py
+prova2.py
+prova3.py
