@@ -1,4 +1,4 @@
-#!/home/gigitarasi/Desktop/VSC_WORKSPACE/Tesi/.env/bin/python
+#!/home/gigitarasi/Desktop/VSC_WORKSPACE/SDP/.env/bin/python
 # -*- coding: utf-8 -*-
 import re
 import sys

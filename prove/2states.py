@@ -5,11 +5,20 @@ import matplotlib.pyplot as plt
 # ============================================================
 # 2-state discrimination 
 #
-# Convenzione:
-# - rho_0, rho_1 sono stati misti: 0 <= rho_x <= I tramite rho_x-rho_x^2 >= 0
-# - S è il proiettore del vuoto: S^2 = S, Tr(S)=1
-# - M0, M1 sono proiettori/outcome di misura, con completezza M0 + M1 = I
-# - Vincolo: Tr(rho_x S) >= 1 - omega
+# Regole da applicare per la riduzione delle parole:
+# - regole proiettive (idempotenza e ortogonalità)
+# - ciclicità della traccia 
+# - inversione delle parole (tutti gli op sono hermitiani)
+#
+#
+# Vincoli:
+# - rho_0, rho_1 sono stati normalizzati: Tr(rho)=1
+# - rho_0, rho_1 sono, in generale, misti: 0 <= rho_x <= I (vincolo rho_x-rho_x^2 >= 0)
+# - Normalizzazione del proiettore sul vuoto: Tr(S)=1
+# - M0, M1 formano una POVM completa: M0 + M1 = I
+# - Vincolo sulla componente di vuoto: Tr(rho_x S) >= 1 - omega
+#
+# Funzione obiettivo:
 # - Witness: W = 1/2 [Tr(rho_0 M0) + Tr(rho_1 M1)]
 #
 # ============================================================
@@ -39,8 +48,7 @@ def reduce_word(w):
 
 def is_zero_word(w):
     """
-    Riconosce prodotti nulli per ortogonalità della misura:
-    M0 M1 = M1 M0 = 0.
+    Riconosce prodotti nulli per ortogonalità della misura: M0 M1 = M1 M0 = 0.
     """
     for a, b in zip(w, w[1:]):
         if a.startswith("M") and b.startswith("M") and a != b:
@@ -71,7 +79,7 @@ class TracialSDP:
         self.vars = {}
 
     def T(self, w):
-        """Restituisce la variabile associata a Tr(w), oppure 0 se la parola è nulla."""
+        """Restituisce la variabile associata a Tr(w), oppure 0 se la parola è nulla (per ortogonalità)."""
         w = tuple(w)
         if is_zero_word(w):
             return 0
@@ -97,7 +105,7 @@ class TracialSDP:
 
     def localizing_matrix(self, words, rho):
         """
-        Localizing matrix per rho - rho^2 >= 0.
+        Localizing matrix associata a rho - rho^2 >= 0.
         Elemento [u,v] = Tr(u^dagger (rho-rho^2) v).
         """
         n = len(words)
@@ -112,10 +120,9 @@ class TracialSDP:
 
 def build_words(include_extra=False):
     """
-    Parole base analoghe al codice 2states originale, ma con M0, M1.
-
+    Costruisce le parole necessarie per il rilassamento SDP.
     include_extra=False è il default per un confronto più pulito.
-    Se True, aggiunge alcune parole di lunghezza 3 ispirate a nstates.
+    Se True, aggiunge alcune parole di lunghezza 3 (ispirate a task più complessi).
     """
     rhos = ["r0", "r1"]
     measurements = ["M0", "M1"]
@@ -159,13 +166,9 @@ def solve_two_state_discrimination(
 ):
     """
     Risolve il rilassamento SDP per discriminazione di 2 stati con POVM completa.
-
-    Parameters
-    ----------
-    omega : float
-        Vincolo Tr(rho_x S) >= 1 - omega.
-    include_extra_words : bool
-        Se True aggiunge parole più forti di lunghezza 3.
+    Parametri:
+    - omega: Vincolo Tr(rho_x S) >= 1 - omega.
+    - include_extra_words: Se True aggiunge parole più forti di lunghezza 3.
     """
     sdp = TracialSDP()
 
