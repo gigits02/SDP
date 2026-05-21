@@ -1,7 +1,7 @@
 .env
-prova1.py
-prova2.py
-prova3.py
+prove/prova1.py
+prove/prova2.py
+prove/prova3.py
 H
 Hmin
 minEntropy.py
