@@ -153,7 +153,7 @@ def build_words(n_x, n_trunc, include_extra=True):
     words += [(s, r) for s in sigmas for r in rhos]
     
     if include_extra:
-        # Alcune parole più forti (da usare per n_x > 2)
+        # Alcune parole più forti
         words += [(r, M, s) for r in rhos for M in measurements for s in sigmas]
         words += [(M, r, s) for M in measurements for r in rhos for s in sigmas]
 
@@ -270,21 +270,9 @@ def cvx_sum(exprs):
     return cp.sum(cp.hstack(exprs))
 
 
-def solve_min_entropy_randomness(
-    n_x,
-    n_trunc,
-    omega,
-    W_obs=None,
-    p_obs=None,
-    x_star=0,
-    solver="MOSEK",
-    verbose=False,
-    include_extra_words=True,
-    tol=1e-5,
-):
+def solve_min_entropy_randomness(n_x, n_trunc, omega, W_obs=None, p_obs=None, x_star=0, solver="MOSEK", verbose=False, include_extra_words=True, tol=1e-5):
     """
     SDP per certificare H_min(B|X=x_star,Lambda) nel task di n-state discrimination.
-
     """
 
     if p_obs is not None:
@@ -313,7 +301,7 @@ def solve_min_entropy_randomness(
     W_list = []
     constraints = []
 
-    # Una hidden strategy lambda=l per ogni possibile guess b=l.
+    # Una hidden strategy lambda=l per ogni possibile guess (b=l).
     for l in range(n_x):
         sdp_l = TracialSDP()
         sdps.append(sdp_l)
@@ -390,7 +378,8 @@ def solve_min_entropy_randomness(
                         "MSK_DPAR_INTPNT_CO_TOL_REL_GAP": 1e-1,
                         "MSK_DPAR_INTPNT_CO_TOL_PFEAS": 1e-7,
                         "MSK_DPAR_INTPNT_CO_TOL_DFEAS": 1e-7,
-                    },)
+                    }
+    )
 
     pg_value = problem.value
     if problem.status not in ["optimal", "optimal_inaccurate"] or pg_value is None or pg_value <= 0:
@@ -445,7 +434,7 @@ for n_trunc in n_trunc_values:
     for N in N_values:
         omega = poisson_omega(N, n_x=n_x, n_trunc=n_trunc)
 
-        # 1) Calcolo il massimo witness compatibile coi vincoli fotonici
+        # 1) Massimo witness compatibile coi vincoli fotonici
         res_W = solve_n_state_discrimination(
             n_x=n_x,
             n_trunc=n_trunc,
@@ -455,7 +444,7 @@ for n_trunc in n_trunc_values:
         )
         W_obs = res_W["sdp_upper_bound"]
 
-        # 2) Calcolo la guessing probability massima compatibile con
+        # 2) Guessing probability massima compatibile con
         # lo stesso witness osservato, quindi H_min = -log2(pg)
         res_H = solve_min_entropy_randomness(
             n_x=n_x,
