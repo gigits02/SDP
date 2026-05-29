@@ -286,7 +286,7 @@ def solve_min_entropy_randomness(
     SDP per certificare H_min(B|X=x_star,Lambda) nel task di n-state discrimination.
 
     Note:
-      - q_l è una variabile classica esterna, non T_l(()).
+      - q_l è una variabile classica esterna.
       - una copia della moment matrix per ogni guess/outcome l.
       - vincoli fotonici imposti solo in media su l.
       - obiettivo pg = sum_l T_l(rho_xstar M_l), poi H_min = -log2(pg).
