@@ -285,13 +285,13 @@ def solve_min_entropy_randomness(
     """
     SDP per certificare H_min(B|X=x_star,Lambda) nel task di n-state discrimination.
 
-    Questa versione segue più da vicino la funzione Min_Entropy degli autori:
+    Note:
       - q_l è una variabile classica esterna, non T_l(()).
       - una copia della moment matrix per ogni guess/outcome l.
       - vincoli fotonici imposti solo in media su l.
       - obiettivo pg = sum_l T_l(rho_xstar M_l), poi H_min = -log2(pg).
 
-    Convenzione mantenuta dal tuo codice:
+    Convenzione:
       omega[x,n] = 1 - P_n(x)
     quindi il lower bound fotonico è:
       photon_lb[x,n] = 1 - omega[x,n].
