@@ -285,16 +285,6 @@ def solve_min_entropy_randomness(
     """
     SDP per certificare H_min(B|X=x_star,Lambda) nel task di n-state discrimination.
 
-    Note:
-      - q_l è una variabile classica esterna.
-      - una copia della moment matrix per ogni guess/outcome l.
-      - vincoli fotonici imposti solo in media su l.
-      - obiettivo pg = sum_l T_l(rho_xstar M_l), poi H_min = -log2(pg).
-
-    Convenzione:
-      omega[x,n] = 1 - P_n(x)
-    quindi il lower bound fotonico è:
-      photon_lb[x,n] = 1 - omega[x,n].
     """
 
     if p_obs is not None:
@@ -302,7 +292,7 @@ def solve_min_entropy_randomness(
         if p_obs.shape != (n_x, n_x):
             raise ValueError(f"p_obs deve avere shape {(n_x, n_x)}, ricevuta {p_obs.shape}")
 
-    # Se non passi né W_obs né p_obs, usa il massimo witness come nel grafico del paper.
+
     if W_obs is None and p_obs is None:
         tmp = solve_n_state_discrimination(
             n_x=n_x,
@@ -334,7 +324,7 @@ def solve_min_entropy_randomness(
         Gamma_l = sdp_l.moment_matrix(words)
         constraints.append(Gamma_l >> 0)
 
-        # Localizing: rho_x - rho_x^2 >= 0, in forma omogeneizzata.
+        # Localizing: rho_x - rho_x^2 >= 0.
         for r in rhos:
             constraints.append(sdp_l.localizing_matrix(loc_words, r) >> 0)
 
@@ -362,7 +352,7 @@ def solve_min_entropy_randomness(
     # Distribuzione classica delle hidden strategies.
     constraints.append(cvx_sum(q_list) == 1)
 
-    # Vincoli fotonici medi. Con la tua convenzione omega=1-P_n, il bound è 1-omega.
+    # Vincoli fotonici medi.
     photon_lb = 1.0 - np.asarray(omega, dtype=float)
     for x, r in enumerate(rhos):
         for n, s in enumerate(sigmas):
