@@ -443,7 +443,11 @@ for n_trunc in n_trunc_values:
             include_extra_words=True,
         )
         W_obs = res_W["sdp_upper_bound"]
-
+        
+        W_target = res_W["sdp_upper_bound"] - 1e-5
+        p_obs = np.full((n_x, n_x), (1 - W_target) / (n_x - 1))
+        np.fill_diagonal(p_obs, W_target)
+        
         # 2) Guessing probability massima compatibile con
         # lo stesso witness osservato, quindi H_min = -log2(pg)
         res_H = solve_min_entropy_randomness(
@@ -451,6 +455,7 @@ for n_trunc in n_trunc_values:
             n_trunc=n_trunc,
             omega=omega,
             W_obs=W_obs,
+            p_obs=None,
             x_star=0,
             solver="MOSEK",
             include_extra_words=True,
