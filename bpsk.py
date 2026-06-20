@@ -5,6 +5,11 @@ import math
 import chaospy
 from math import erf, sqrt, inf
 from scipy.special import erfinv
+import time
+from pathlib import Path
+import pandas as pd
+from datetime import datetime
+
 def reduce_word(w):
     """
     Riduce una parola usando le relazioni di idempotenza dei proiettori:
@@ -583,6 +588,7 @@ def solve_shannon_entropy_bff_randomness(
         "statuses": statuses,
         "num_constraints_per_node": num_constraints,
         "num_words": len(words),
+        "m_eff": m_eff
     }
 
 # =========================================================
@@ -654,9 +660,30 @@ def bpsk_omega(alpha):
 N_values = np.linspace(0.005, 0.36, 20)
 n_x = 2
 n_trunc = 0
-#n_b_values = [2, 4, 8]
-n_b_values = [2]
+#n_b_values = [2]
+n_b_values = [2, 4, 8]
 
+#crea o entra nel path e salva la configutazione con tutte le info necessarie
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+run_name = f"nx{n_x}_N{N_values[0]:.2f}_{N_values[-1]:.2f}_ntrunc{n_trunc}_{timestamp}"
+outdir = Path("results") / "bpsk" / run_name
+outdir.mkdir(parents=True, exist_ok=True)
+
+csv_path = outdir / "bpsk_results.csv"
+config_path = outdir / "bpsk_config.txt"
+
+with open(config_path, "w") as f:
+    f.write(f"script = shannonGlobal.py\n")
+    f.write(f"n_x = {n_x}\n")
+    f.write(f"N_values = {N_values}\n")
+    f.write(f"n_trunc_values = {n_trunc}\n")
+    f.write(f"solver = MOSEK\n")
+    f.write(f"include_extra_words = False\n")
+    f.write(f"bpsk_level = False\n")
+
+
+rows = []
+#simulazione
 results = {}
 
 for n_b in n_b_values:
@@ -664,18 +691,17 @@ for n_b in n_b_values:
     H_values = []
 
     for N in N_values:
+        t0 = time.perf_counter()
 
         alpha = np.sqrt(N)
-        x1 = (sqrt(2.0) * alpha - erfinv(0.5 * (erf(sqrt(2.0) * alpha) - 1.0)))
-        
         omega = bpsk_omega(alpha)
 
+        x1 = (sqrt(2.0) * alpha - erfinv(0.5 * (erf(sqrt(2.0) * alpha) - 1.0)))
+        
         if n_b == 2:
             p_obs = bpsk_p_obs(alpha, n_b=2)
-
         elif n_b == 4:
             p_obs = bpsk_p_obs(alpha, n_b=4, x1=x1)
-
         elif n_b == 8:
             p_obs = bpsk_p_obs(alpha, n_b=8, x1=x1, x2=2*x1, x3=3*x1)  
 
@@ -688,23 +714,46 @@ for n_b in n_b_values:
             W_obs=None,
             x_star=0,
             solver="MOSEK",
-            include_extra_words=True,
-            bpsk_level=True,
+            include_extra_words=False,
+            bpsk_level=False,
             m=4, 
             verbose=False,
         )
 
         H_values.append(res["H_shannon_bits"])
 
+        runtime = time.perf_counter() - t0
+        '''
         print(
             f"n_b={n_b:2d} | N={N:.4f} | "
             f"H={res['H_shannon_bits']:.8f} | "
             f"status={res['statuses']}"
         )
+        '''
+        rows.append({
+            "N": float(N),
+            "n_x": n_x,
+            "n_b": n_b,
+            "n_trunc": n_trunc,
 
-    results[n_b] = np.array(H_values)
+            "p_obs": str(p_obs.tolist()),
+            "statuses": str(res["statuses"]),
+            "H_shannon_bits": res["H_shannon_bits"],
+            
+            "c_m": res["c_m"],
+            "m_eff": res["m_eff"],
 
+            "runtime_sec": runtime,
+            "num_constraints_per_node": str(res["num_constraints_per_node"]),
+            "num_words": res["num_words"],
 
+            "node_values": str(res["node_values"]),
+        })
+        pd.DataFrame(rows).to_csv(csv_path, index=False)
+
+    #results[n_b] = np.array(H_values)
+
+'''
 for n_b in n_b_values:
     plt.plot(N_values, results[n_b], "-", label=f"{n_b} bins")
 
@@ -717,4 +766,4 @@ plt.grid(True, alpha=0.3)
 plt.legend()
 plt.tight_layout()
 plt.show()
-
+'''

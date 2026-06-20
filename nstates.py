@@ -2,6 +2,10 @@ import cvxpy as cp
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+import time
+from pathlib import Path
+import pandas as pd
+from datetime import datetime
 
 def reduce_word(w):
     """
@@ -242,6 +246,7 @@ def solve_n_state_discrimination(n_x, n_trunc, omega, solver="CLARABEL", verbose
         "num_words": len(words),
         "words": words,
         "moment_variables": sdp.vars,
+        "num_constraints": len(constraints)
     }
 
 def poisson_photon_weights(N, n_trunc):
@@ -260,16 +265,38 @@ def poisson_omega(N, n_x, n_trunc):
 
 #N_values = [0.005, 0.1, 0.2, 0.5]
 N_values = np.linspace(0.01, 1.0, 10)
-n_x = 4
+n_x = 2
 n_trunc_values = [0,1,2]
 
-plt.figure(figsize=(7, 5))
+#plt.figure(figsize=(7, 5))
 
+#crea o entra nel path e salva la configutazione con tutte le info necessarie
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+run_name = f"nx{n_x}_N{N_values[0]:.2f}_{N_values[-1]:.2f}_ntrunc{'-'.join(map(str, n_trunc_values))}_{timestamp}"
+outdir = Path("results") / "nstates" / run_name
+outdir.mkdir(parents=True, exist_ok=True)
+
+csv_path = outdir / "nstates_discrimination_results.csv"
+config_path = outdir / "nstates_config.txt"
+
+with open(config_path, "w") as f:
+    f.write(f"script = nstates.py\n")
+    f.write(f"n_x = {n_x}\n")
+    f.write(f"N_values = {N_values}\n")
+    f.write(f"n_trunc_values = {n_trunc_values}\n")
+    f.write(f"solver = MOSEK\n")
+    f.write(f"include_extra_words = True\n")
+
+
+rows = []
+#simulazione
 for n_trunc in n_trunc_values:
 
-    print(f"\n===== n_trunc = {n_trunc} =====")
+    #print(f"\n===== n_trunc = {n_trunc} =====")
     sdp_values = []
     for N in N_values:
+        t0 = time.perf_counter()
+        
         omega = poisson_omega(N, n_x=n_x, n_trunc=n_trunc)
         res = solve_n_state_discrimination(
             n_x=n_x,
@@ -280,6 +307,8 @@ for n_trunc in n_trunc_values:
         )
         sdp_values.append(res["sdp_upper_bound"])
 
+        runtime = time.perf_counter() - t0
+        '''
         print(
             f"N={N:.3f} | "
             f"SDP={res['sdp_upper_bound']:.10f} | "
@@ -287,12 +316,26 @@ for n_trunc in n_trunc_values:
             #f"words={res['num_words']} | "
             #f"vars={res['num_moment_variables']}"
         )
+        '''
+        rows.append({
+            "N": float(N),
+            "n_x": n_x,
+            "n_trunc": n_trunc,
+            "status": res["status"],
+            "value": res["sdp_upper_bound"],
+            "runtime_sec": runtime,
+            "num_constraints": res["num_constraints"],
+            "num_words": res["num_words"],
+        })
+        pd.DataFrame(rows).to_csv(csv_path, index=False)
 
-    plt.plot(N_values, sdp_values, "--", label=fr"$n_{{\mathrm{{trunc}}}}={n_trunc}$")
+    #plt.plot(N_values, sdp_values, "--", label=fr"$n_{{\mathrm{{trunc}}}}={n_trunc}$")
 
+'''
 plt.xlabel(r"$N$")
 plt.ylabel(fr"$W_{{{n_x}\mathrm{{disc}}}}$")
 plt.title(fr"{n_x}-states discrimination")
 plt.grid(True)
 plt.legend()
 plt.show()
+'''

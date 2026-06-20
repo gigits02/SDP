@@ -2,6 +2,10 @@ import cvxpy as cp
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+import time
+from pathlib import Path
+import pandas as pd
+from datetime import datetime
 
 def reduce_word(w):
     """
@@ -423,15 +427,37 @@ N_values = np.linspace(0.01, 2.0, 30)
 n_x = 2
 n_trunc_values = [0,1,2]
 
-plt.figure(figsize=(7, 5))
+#plt.figure(figsize=(7, 5))
 
+#crea o entra nel path e salva la configutazione con tutte le info necessarie
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+run_name = f"nx{n_x}_N{N_values[0]:.2f}_{N_values[-1]:.2f}_ntrunc{'-'.join(map(str, n_trunc_values))}_{timestamp}"
+outdir = Path("results") / "minEntropy" / run_name
+outdir.mkdir(parents=True, exist_ok=True)
+
+csv_path = outdir / "minEntropy_results.csv"
+config_path = outdir / "minEntropy_config.txt"
+
+with open(config_path, "w") as f:
+    f.write(f"script = minEntropy.py\n")
+    f.write(f"n_x = {n_x}\n")
+    f.write(f"N_values = {N_values}\n")
+    f.write(f"n_trunc_values = {n_trunc_values}\n")
+    f.write(f"solver = MOSEK\n")
+    f.write(f"include_extra_words = True\n")
+
+
+rows = []
+#simulazione
 for n_trunc in n_trunc_values:
-    print(f"\n===== n_trunc = {n_trunc} =====")
+    
+    #print(f"\n===== n_trunc = {n_trunc} =====")
     hmin_values = []
     pg_values = []
     W_values = []
 
     for N in N_values:
+        t0 = time.perf_counter()
         omega = poisson_omega(N, n_x=n_x, n_trunc=n_trunc)
 
         # 1) Massimo witness compatibile coi vincoli fotonici
@@ -466,6 +492,8 @@ for n_trunc in n_trunc_values:
         pg_values.append(res_H["guessing_probability"])
         W_values.append(W_obs)
 
+        runtime = time.perf_counter() - t0
+        '''
         print(
             f"N={N:.3f} | "
             f"W_obs={W_obs:.10f} | "
@@ -475,12 +503,32 @@ for n_trunc in n_trunc_values:
             f"W_total={res_H['W_total']} | "
             f"q={res_H['q_values']}"
         )
+        '''
+        rows.append({
+            "N": float(N),
+            "n_x": n_x,
+            "n_trunc": n_trunc,
 
-    plt.plot(N_values, hmin_values, "--", label=fr"$n_{{\mathrm{{trunc}}}}={n_trunc}$")
+            "W_obs": W_obs,
+            "W_total": res_H["W_total"],
+            "pg": res_H["guessing_probability_clipped"],
+            
+            "status": res_H["status"],
+            "H_min_bits": res_H["H_min_bits"],
+            "runtime_sec": runtime,
+            "num_constraints": res_H["num_constraints"],
+            "num_blocks": res_H["num_blocks"],
+            "num_words_per_block": res_H["num_words_per_block"],
+        })
+        pd.DataFrame(rows).to_csv(csv_path, index=False)
 
+    #plt.plot(N_values, hmin_values, "--", label=fr"$n_{{\mathrm{{trunc}}}}={n_trunc}$")
+
+'''
 plt.xlabel(r"$N$")
 plt.ylabel(r"$H_{\min}$ [bits]")
 plt.title(fr"Min-entropy from {n_x}-states discrimination")
 plt.grid(True)
 plt.legend()
 plt.show()
+'''

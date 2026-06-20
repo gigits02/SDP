@@ -295,16 +295,20 @@ class LiftedTraceBlock:
     """
     Blocco BFF per un singolo paio (i,b). Contiene variabili lineari
     per Tr(w), Tr(Z w), Tr(Z^2 w). Z è trattato come z I
-    e la convessita' è imposta tramite il vincolo generale
+    e la convessità è imposta tramite il vincolo generale
     [[G,zG],[zG,hG]] >= 0.
+
+    Nota: label serve solo per dare nomi diversi alle variabili CVXPY
+    quando costruiamo simultaneamente tutti i blocchi (i,b) nello stesso SDP.
     """
-    def __init__(self, words, base):
+    def __init__(self, words, base, label=""):
         self.words = words
         self.base = base
+        self.label = label
         self.z_vars = {}
         self.h_vars = {}
-        self.z_scalar = cp.Variable(nonpos=True)
-        self.h_scalar = cp.Variable(nonneg=True)
+        self.z_scalar = cp.Variable(nonpos=True, name=f"z_scalar_{label}")
+        self.h_scalar = cp.Variable(nonneg=True, name=f"h_scalar_{label}")
 
     def T(self, w):
         return self.base.T(w)
@@ -317,7 +321,8 @@ class LiftedTraceBlock:
         if is_zero_word(key):
             return 0
         if key not in self.z_vars:
-            name = "ZT_I" if len(key) == 0 else "ZT_" + "_".join(key)
+            base_name = "ZT_I" if len(key) == 0 else "ZT_" + "_".join(key)
+            name = f"{base_name}_{self.label}" if self.label else base_name
             self.z_vars[key] = cp.Variable(name=name)
         return self.z_vars[key]
 
@@ -329,7 +334,8 @@ class LiftedTraceBlock:
         if is_zero_word(key):
             return 0
         if key not in self.h_vars:
-            name = "HT_I" if len(key) == 0 else "HT_" + "_".join(key)
+            base_name = "HT_I" if len(key) == 0 else "HT_" + "_".join(key)
+            name = f"{base_name}_{self.label}" if self.label else base_name
             self.h_vars[key] = cp.Variable(name=name)
         return self.h_vars[key]
 
@@ -369,24 +375,24 @@ def solve_shannon_entropy_bff_randomness(
     psd_tol=1e-8,
 ):
     """
-    SDP per certificare H(b|x=x_star,lambda) con Shannon entropy
-    linearizzata via Brown-Fawzi-Fawzi (metodo delle quadrature di Gauss-Radau).
+    SDP per certificare H(B|X=x_star, Lambda) con Shannon entropy
+    linearizzata via Brown-Fawzi-Fawzi / Gauss-Radau.
 
     Convenzioni:
       - scenario n-state discrimination: n_x stati e n_x outcome;
       - una sola measurement y=0, quindi M_b := M_{b|0};
-      - omega[x,n] = 1 - P_n(x), quindi Tr(rho_x sigma_n) >= 1-omega[x,n];
-      - se p_obs e' dato, viene fissata tutta la distribuzione p(b|x),
-      altrimenti si fissa il witness W >= W_obs - tol.
+      - omega[x,n] = 1 - P_n(x), quindi Tr(rho_x sigma_n) >= 1 - omega[x,n];
+      - se p_obs è dato, viene fissata tutta la distribuzione p(b|x);
+        altrimenti si fissa il witness W >= W_obs - W_tol.
 
-    La forma implementata è:
-      H >= c_m + sum_i min_Gamma tau_i sum_b [
-            2 Tr(Z_b rho_x* M_b)
-          + (1-t_i) Tr(Z_b rho_x* Z_b M_b)
-          + t_i Tr(Z_b rho_x* Z_b)
-        ].
-    In forma rilassata usiamo variabili Tr(w), Tr(Zw), Tr(Z^2w),
-    il vincolo zG <= 0 e PSD [[G,zG],[zG,hG]] >= 0.
+    IMPORTANTE:
+      Questa versione fa UN SOLO SDP globale:
+
+          H >= c_m + min_Gamma,{Z_{i,b}} sum_i tau_i sum_b [ ... ]
+
+      quindi tutti i nodi di quadratura i condividono la stessa matrice dei
+      momenti fisica Gamma, gli stessi stati rho_x, gli stessi operatori M_b e
+      gli stessi vincoli osservati.  
     """
 
     omega = np.asarray(omega, dtype=float)
@@ -414,13 +420,8 @@ def solve_shannon_entropy_bff_randomness(
     c_m = float(np.sum(tau))
     m_eff = len(t)
 
-    #print("t =", t)
-    #print("w =", w)
-    #print("tau =", tau)
-    #print("c_m =", c_m)
-    #print("m_eff =", m_eff)
-
-    # Se non vengono passati né W_obs né p_obs, prima calcolo il massimo witness compatibile (servirà per il constraint su W_total).
+    # Se non vengono passati né W_obs né p_obs, prima calcolo il massimo witness
+    # compatibile coi vincoli fotonici, poi certifico l'entropia a quel valore.
     if W_obs is None and p_obs is None:
         res_W = solve_n_state_discrimination(
             n_x=n_x,
@@ -437,75 +438,78 @@ def solve_shannon_entropy_bff_randomness(
     loc_words = build_localizing_words(n_x, n_trunc)
     photon_lb = 1.0 - omega
 
-    H_total = c_m
-    block_values = []
-    statuses = []
-    num_constraints = []
+    constraints = []
 
-    # un SDP indipendente per ciascun nodo i=1,...,m-1.
-    # range(1,m). Il contributo costante c_m resta fuori.
-    for i in range(m_eff):
-        constraints = []
+    # Un'unica classe SDP di base: G è comune a tutti i nodi i.
+    base = TracialSDP()
+    G = base.moment_matrix(words)
+    constraints.append(G >> 0)
 
-        # Classe SDP (di base) comune a tutti i blocchi b
-        base = TracialSDP()
+    # Localizing matrices: rho_x - rho_x^2 >= 0.
+    base_localizing = {}
+    for r in rhos:
+        L = base.localizing_matrix(loc_words, r)
+        base_localizing[r] = L
+        constraints.append(L >> 0)
 
-        # Un blocco Z_b per ciascun outcome b (nuova classe SDP per le variabili Z)
-        blocks = [LiftedTraceBlock(words, base) for _ in range(n_x)]
+    # Normalizzazione degli stati e dei proiettori fotonici.
+    for r in rhos:
+        constraints.append(base.T((r,)) == 1)
+    for s in sigmas:
+        constraints.append(base.T((s,)) == 1)
 
-        G = base.moment_matrix(words)
-        constraints.append(G >> 0)
+    # Completezza POVM: sum_b M_b = I, imposta sui monomi localizing.
+    for u in loc_words:
+        for v in loc_words:
+            lhs = cvx_sum(
+                base.T(tuple(reversed(u)) + (M,) + tuple(v))
+                for M in measurements
+            )
+            rhs = base.T(tuple(reversed(u)) + tuple(v))
+            constraints.append(lhs == rhs)
 
-        for r in rhos:
-            constraints.append(base.localizing_matrix(loc_words, r) >> 0)
-        for r in rhos:
-            constraints.append(base.T((r,)) == 1)
-        for s in sigmas:
-            constraints.append(base.T((s,)) == 1)
+    # Vincoli fotonici.
+    for x, r in enumerate(rhos):
+        for n, s in enumerate(sigmas):
+            constraints.append(base.T((r, s)) >= photon_lb[x, n])
+            constraints.append(base.T((r, s)) <= 1)
 
-        # Completezza POVM: sum_b M_b = I, imposta sui monomi localizing.
-        for u in loc_words:
-            for v in loc_words:
-                lhs = cvx_sum(
-                    base.T(tuple(reversed(u)) + (M,) + tuple(v))
-                    for M in measurements
-                )
-                rhs = base.T(tuple(reversed(u)) + tuple(v))
-                constraints.append(lhs == rhs)
-
-        # Vincoli fotonici.
+    # Dati osservati: distribuzione completa o witness.
+    if p_obs is not None:
         for x, r in enumerate(rhos):
-            for n, s in enumerate(sigmas):
-                constraints.append(base.T((r, s)) >= photon_lb[x, n])
-                constraints.append(base.T((r, s)) <= 1)
+            for b, M in enumerate(measurements):
+                constraints.append(base.T((r, M)) == p_obs[x, b])
 
-        # Dati osservati: distribuzione completa o witness.
-        if p_obs is not None:
-            for x, r in enumerate(rhos):
-                for b, M in enumerate(measurements):
-                    constraints.append(base.T((r, M)) == p_obs[x, b])
+    if W_obs is not None:
+        W_total = cvx_sum(base.T((rhos[x], measurements[x])) for x in range(n_x)) / n_x
+        constraints.append(W_total >= W_obs - W_tol)
+    else:
+        W_total = None
 
-        if W_obs is not None:
-            W_total = cvx_sum(base.T((rhos[x], measurements[x])) for x in range(n_x)) / n_x
-            constraints.append(W_total >= W_obs - W_tol)
-        else:
-            W_total = None
+    # Blocchi BFF: uno per ogni coppia (i,b), ma tutti condividono la stessa Gamma G.
+    blocks = [[LiftedTraceBlock(words, base, label=f"i{i}_b{b}") for b in range(n_x)] for i in range(m_eff)]
 
+    H_terms_by_node = []
+    H_obj = c_m
+
+    for i in range(m_eff):
         H_i = 0
-        for b, block in enumerate(blocks):
+        for b, block in enumerate(blocks[i]):
             zG = block.GammaMatrix_from(block.ZT, words)
             hG = block.GammaMatrix_from(block.HT, words)
 
+            # Z <= 0 e blocco liftato PSD per Z e Z^2.
             constraints.append(zG << psd_tol * np.eye(len(words)))
             constraints.append(cp.bmat([[G, zG], [zG, hG]]) >> -psd_tol * np.eye(2 * len(words)))
 
+            # Versione liftata anche per i localizing constraints rho-rho^2 >= 0.
             for r in rhos:
-                L = base.localizing_matrix(loc_words, r)
+                L = base_localizing[r]
                 zL = block.localizing_from(block.ZT, loc_words, r)
                 hL = block.localizing_from(block.HT, loc_words, r)
                 constraints.append(cp.bmat([[L, zL], [zL, hL]]) >> -psd_tol * np.eye(2 * len(loc_words)))
 
-            # Z=zI e Z^2=hI e le normalizzazioni cambiano:
+            # Z = z I e Z^2 = h I sulle tracce normalizzate rilevanti.
             for r in rhos:
                 constraints.append(block.ZT((r,)) == block.z_scalar)
                 constraints.append(block.HT((r,)) == block.h_scalar)
@@ -513,7 +517,7 @@ def solve_shannon_entropy_bff_randomness(
                 constraints.append(block.ZT((s,)) == block.z_scalar)
                 constraints.append(block.HT((s,)) == block.h_scalar)
 
-            # Completezza delle POVM anche nei layer Z e Z^2.
+            # Completezza POVM anche nei layer Z e Z^2.
             for u in loc_words:
                 for v in loc_words:
                     lhs_z = cvx_sum(
@@ -530,40 +534,47 @@ def solve_shannon_entropy_bff_randomness(
                     rhs_h = block.HT(tuple(reversed(u)) + tuple(v))
                     constraints.append(lhs_h == rhs_h)
 
-            # Funzione obiettivo
-            p_z = block.ZT((rhos[x_star],measurements[b]))
-            p_h = block.HT((rhos[x_star],measurements[b]))
+            # Contributo del noto i e outcome b.
+            p_z = block.ZT((rhos[x_star], measurements[b]))
+            p_h = block.HT((rhos[x_star], measurements[b]))
             rho_h = block.HT((rhos[x_star],))
             H_i += tau[i] * (2.0 * p_z + (1.0 - t[i]) * p_h + t[i] * rho_h)
 
-        problem = cp.Problem(cp.Minimize(H_i), constraints)
+        H_terms_by_node.append(H_i)
+        H_obj += H_i
 
-        if solver.upper() == "MOSEK":
-            problem.solve(
-                solver="MOSEK",
-                verbose=verbose,
-                mosek_params={
-                    "MSK_DPAR_INTPNT_CO_TOL_REL_GAP": 1e-1,
-                    "MSK_DPAR_INTPNT_CO_TOL_PFEAS": 1e-7,
-                    "MSK_DPAR_INTPNT_CO_TOL_DFEAS": 1e-7,
-                },
-            )
-        else:
-            problem.solve(solver=solver, verbose=verbose)
+    problem = cp.Problem(cp.Minimize(H_obj), constraints)
 
-        statuses.append(problem.status)
-        num_constraints.append(len(constraints))
-        if problem.value is None:
-            return {
-                "H_shannon_bits": None,
-                "status": problem.status,
-                "failed_node": i,
-                "node_values": block_values,
-                "statuses": statuses,
-            }
+    if solver.upper() == "MOSEK":
+        problem.solve(
+            solver="MOSEK",
+            verbose=verbose,
+            mosek_params={
+                "MSK_DPAR_INTPNT_CO_TOL_REL_GAP": 1e-1,
+                "MSK_DPAR_INTPNT_CO_TOL_PFEAS": 1e-7,
+                "MSK_DPAR_INTPNT_CO_TOL_DFEAS": 1e-7,
+            },
+        )
+    else:
+        problem.solve(solver=solver, verbose=verbose)
 
-        block_values.append(float(problem.value))
-        H_total += float(problem.value)
+    if problem.value is None:
+        return {
+            "H_shannon_bits": None,
+            "status": problem.status,
+            "statuses": [problem.status],
+            "node_values": None,
+            "num_constraints": len(constraints),
+            "num_words": len(words),
+        }
+
+    # Se dovesse servire: dopo aver risolto l'SDP globale, salvo i contributi dei singoli nodi.
+    node_values = []
+    for expr in H_terms_by_node:
+        try:
+            node_values.append(float(expr.value))
+        except Exception:
+            node_values.append(None)
 
     return {
         "n_x": n_x,
@@ -573,16 +584,20 @@ def solve_shannon_entropy_bff_randomness(
         "x_star": x_star,
         "W_obs": W_obs,
         "p_obs": p_obs,
-        "H_shannon_bits": max(float(H_total), 0.0),
+        "H_shannon_bits": max(float(problem.value), 0.0),
+        "raw_objective_value": float(problem.value),
         "c_m": c_m,
         "tau": tau,
         "t": t,
         "w": w,
-        "node_values": block_values,
-        "statuses": statuses,
-        "num_constraints_per_node": num_constraints,
+        "node_values": node_values,
+        "status": problem.status,
+        "statuses": [problem.status],
+        "num_constraints": len(constraints),
         "num_words": len(words),
-        "m_eff": m_eff
+        "num_moment_variables": len(base.vars),
+        "num_lifted_blocks": m_eff * n_x,
+        "m_eff": m_eff,
     }
 
 
@@ -602,11 +617,11 @@ mode = "witness"
 #crea o entra nel path e salva la configutazione con tutte le info necessarie
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 run_name = f"nx{n_x}_N{N_values[0]:.2f}_{N_values[-1]:.2f}_ntrunc{'-'.join(map(str, n_trunc_values))}_{timestamp}"
-outdir = Path("results") / "shannon" / run_name
+outdir = Path("results") / "shannon2" / run_name
 outdir.mkdir(parents=True, exist_ok=True)
 
-csv_path = outdir / "shannon_results.csv"
-config_path = outdir / "shannon_config.txt"
+csv_path = outdir / "shannon2_results.csv"
+config_path = outdir / "shannon2_config.txt"
 
 with open(config_path, "w") as f:
     f.write(f"script = shannonGlobal.py\n")
@@ -698,14 +713,15 @@ for n_trunc in n_trunc_values:
             "mode": mode,
 
             "W_obs": H_result["W_obs"],
-            "statuses": str(H_result["statuses"]),
+            "status": H_result["status"],
             "H_shannon_bits": H_result["H_shannon_bits"],
 
             "c_m": H_result["c_m"],
             "m_eff": H_result["m_eff"],
+            "num_lifted_blocks": H_result["num_lifted_blocks"],
 
             "runtime_sec": runtime,
-            "num_constraints": H_result["num_constraints_per_node"],
+            "num_constraints": H_result["num_constraints"],
             "num_words": H_result["num_words"],
 
             "node_values": str(H_result["node_values"]),
