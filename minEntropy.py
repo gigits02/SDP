@@ -141,23 +141,17 @@ def build_operators(n_x, n_trunc):
 
 def build_words(n_x, n_trunc, include_extra=True):
     rhos, measurements, sigmas = build_operators(n_x, n_trunc)
-
+    generators = rhos + measurements + sigmas
     words = [()]
 
-    # Parole di lunghezza 1
-    words += [(r,) for r in rhos]
-    words += [(M,) for M in measurements]
-    words += [(s,) for s in sigmas]
+    # livello 1
+    words += [(A,) for A in generators]
 
-    # Parole di lunghezza 2 rilevanti
-    words += [(r, M) for r in rhos for M in measurements]
-    words += [(r, s) for r in rhos for s in sigmas]
-    words += [(s, M) for s in sigmas for M in measurements]
-    words += [(r, r) for r in rhos]
-    words += [(s, r) for s in sigmas for r in rhos]
-    
+    # livello 2 completo: tutti i prodotti AB
+    words += [(A, B) for A in generators for B in generators]
+
     if include_extra:
-        # Alcune parole più forti
+        # Alcune parole più forti (da usare per n_x > 2)
         words += [(r, M, s) for r in rhos for M in measurements for s in sigmas]
         words += [(M, r, s) for M in measurements for r in rhos for s in sigmas]
 

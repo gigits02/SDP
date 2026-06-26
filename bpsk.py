@@ -144,21 +144,17 @@ def build_operators(n_x, n_b, n_trunc):
 
 def build_words(n_x, n_b, n_trunc, include_extra=True, bpsk_level=True):
     rhos, measurements, sigmas = build_operators(n_x, n_b, n_trunc)
-
+    generators = rhos + measurements + sigmas
     words = [()]
 
     # livello 1
-    words += [(r,) for r in rhos]
-    words += [(M,) for M in measurements]
-    words += [(s,) for s in sigmas]
+    words += [(A,) for A in generators]
 
-    # livello 2 
-    words += [(r, M) for r in rhos for M in measurements]
-    words += [(r, s) for r in rhos for s in sigmas]
-    words += [(s, M) for s in sigmas for M in measurements]
-    words += [(r1, r2) for r1 in rhos for r2 in rhos]
+    # livello 2 completo: tutti i prodotti AB
+    words += [(A, B) for A in generators for B in generators]
 
     if include_extra:
+        # Alcune parole più forti (da usare per n_x > 2)
         words += [(r, M, s) for r in rhos for M in measurements for s in sigmas]
         words += [(M, r, s) for M in measurements for r in rhos for s in sigmas]
 
@@ -167,12 +163,15 @@ def build_words(n_x, n_b, n_trunc, include_extra=True, bpsk_level=True):
         words += [(r1, r2, r3) for r1 in rhos for r2 in rhos for r3 in rhos]
         words += [(s, M, r) for s in sigmas for M in measurements for r in rhos]
 
+    # Applica le regole di proiezione riducendo le parole
     unique = []
     seen = set()
     for w in words:
         w = reduce_word(tuple(w))
+
         if is_zero_word(w):
             continue
+
         if w not in seen:
             seen.add(w)
             unique.append(w)
@@ -678,8 +677,8 @@ with open(config_path, "w") as f:
     f.write(f"N_values = {N_values}\n")
     f.write(f"n_trunc_values = {n_trunc}\n")
     f.write(f"solver = MOSEK\n")
-    f.write(f"include_extra_words = False\n")
-    f.write(f"bpsk_level = False\n")
+    f.write(f"include_extra_words = True\n")
+    f.write(f"bpsk_level = True\n")
 
 
 rows = []
@@ -714,8 +713,8 @@ for n_b in n_b_values:
             W_obs=None,
             x_star=0,
             solver="MOSEK",
-            include_extra_words=False,
-            bpsk_level=False,
+            include_extra_words=True,
+            bpsk_level=True,
             m=4, 
             verbose=False,
         )
