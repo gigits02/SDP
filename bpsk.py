@@ -265,6 +265,157 @@ def poisson_omega(N, n_x, n_trunc):
 
 
 # =========================================================
+# MIN ENTROPY LINEARIZZATA DAL TRICK l=b
+# =========================================================
+
+def solve_min_entropy_randomness(n_x, n_b, n_trunc, omega, W_obs=None, p_obs=None, x_star=0, solver="MOSEK", verbose=False, include_extra_words=True, bpsk_level=True, tol=1e-5):
+    """
+    SDP per certificare H_min(B|X=x_star,Lambda) nel task di n-state discrimination.
+    """
+
+    if p_obs is not None:
+        p_obs = np.asarray(p_obs, dtype=float)
+        if p_obs.shape != (n_x, n_b):
+            raise ValueError(f"p_obs deve avere shape {(n_x, n_b)}, ricevuta {p_obs.shape}")
+
+
+    if W_obs is None and p_obs is None:
+        tmp = solve_n_state_discrimination(
+            n_x=n_x,
+            n_b=n_b,
+            n_trunc=n_trunc,
+            omega=omega,
+            solver=solver,
+            verbose=verbose,
+            include_extra_words=include_extra_words,
+        )
+        W_obs = tmp["sdp_upper_bound"]
+
+    rhos, measurements, sigmas = build_operators(n_x, n_b, n_trunc)
+    words = build_words(n_x, n_b, n_trunc, include_extra=include_extra_words, bpsk_level=bpsk_level)
+    loc_words = build_localizing_words(n_x, n_b, n_trunc)
+
+    sdps = []
+    q_list = []
+    W_list = []
+    constraints = []
+
+    # Una hidden strategy lambda=l per ogni possibile guess (b=l).
+    for l in range(n_b):
+        sdp_l = TracialSDP()
+        sdps.append(sdp_l)
+
+        q_l = cp.Variable(nonneg=True, name=f"q_{l}")
+        q_list.append(q_l)
+
+        Gamma_l = sdp_l.moment_matrix(words)
+        constraints.append(Gamma_l >> 0)
+
+        # Localizing: rho_x - rho_x^2 >= 0.
+        for r in rhos:
+            constraints.append(sdp_l.localizing_matrix(loc_words, r) >> 0)
+
+        # Normalizzazioni pesate: Tr_l(rho_x)=q_l e Tr_l(sigma_n)=q_l.
+        for r in rhos:
+            constraints.append(sdp_l.T((r,)) == q_l)
+        for s in sigmas:
+            constraints.append(sdp_l.T((s,)) == q_l)
+
+        # Completezza POVM per ogni blocco l.
+        for u in loc_words:
+            for v in loc_words:
+                lhs = cvx_sum(
+                    sdp_l.T(tuple(reversed(u)) + (M,) + tuple(v))
+                    for M in measurements
+                )
+                rhs = sdp_l.T(tuple(reversed(u)) + tuple(v))
+                constraints.append(lhs == rhs)
+
+        if n_b >= n_x:
+            W_l = cvx_sum(
+                sdp_l.T((rhos[x], measurements[x])) for x in range(n_x)
+            ) / n_x
+        else:
+            W_l = 0
+        W_list.append(W_l)
+
+    # Distribuzione classica delle hidden strategies.
+    constraints.append(cvx_sum(q_list) == 1)
+
+    # Vincoli fotonici medi.
+    photon_lb = 1.0 - np.asarray(omega, dtype=float)
+    for x, r in enumerate(rhos):
+        for n, s in enumerate(sigmas):
+            constraints.append(
+                cvx_sum(sdps[l].T((r, s)) for l in range(n_b))
+                >= photon_lb[x, n]
+            )
+
+    # Dati osservati: o distribuzione completa, o solo witness.
+    if p_obs is not None:
+        for x, r in enumerate(rhos):
+            for b, M in enumerate(measurements):
+                constraints.append(
+                    cvx_sum(sdps[l].T((r, M)) for l in range(n_b))
+                    == p_obs[x, b]
+                )
+
+    if W_obs is not None:
+        W_total = cvx_sum(W_list)
+        constraints.append(W_total >= W_obs - tol)
+    else:
+        W_total = None
+
+    # Guessing probability.
+    pg = cvx_sum(
+        sdps[l].T((rhos[x_star], measurements[l]))
+        for l in range(n_b)
+    )
+
+    problem = cp.Problem(cp.Maximize(pg), constraints)
+    problem.solve(
+                    solver="MOSEK",
+                    verbose=verbose,
+                    mosek_params={
+                        "MSK_DPAR_INTPNT_CO_TOL_REL_GAP": 1e-1,
+                        "MSK_DPAR_INTPNT_CO_TOL_PFEAS": 1e-7,
+                        "MSK_DPAR_INTPNT_CO_TOL_DFEAS": 1e-7,
+                    }
+    )
+
+    pg_value = problem.value
+    if problem.status not in ["optimal", "optimal_inaccurate"] or pg_value is None or pg_value <= 0:
+        H_min = None
+        pg_clip = None
+    else:
+        pg_clip = min(max(float(pg_value), 0.0), 1.0)
+        H_min = -np.log2(pg_clip)
+
+    q_values = None
+    if problem.status in ["optimal", "optimal_inaccurate"]:
+        q_values = [None if q.value is None else float(q.value) for q in q_list]
+
+    return {
+        "n_x": n_x,
+        "n_trunc": n_trunc,
+        "omega": omega,
+        "photon_lb": photon_lb,
+        "x_star": x_star,
+        "W_obs": W_obs,
+        "p_obs": p_obs,
+        "guessing_probability": pg_value,
+        "guessing_probability_clipped": pg_clip,
+        "H_min_bits": H_min,
+        "status": problem.status,
+        "q_values": q_values,
+        "W_total": None if W_total is None else W_total.value,
+        "num_blocks": n_b,
+        "num_constraints": len(constraints),
+        "num_words_per_block": len(words),
+        "num_moment_variables_per_block": [len(sdp.vars) for sdp in sdps],
+    }
+
+# =========================================================
 # SHANNON ENTROPY LINEARIZZATA CON BFF / GAUSS-RADAU
 # =========================================================
 
@@ -353,7 +504,6 @@ class LiftedTraceBlock:
             for u in loc_words
         ])
 
-
 def solve_shannon_entropy_bff_randomness(
     n_x,
     n_b,
@@ -428,6 +578,7 @@ def solve_shannon_entropy_bff_randomness(
     if W_obs is None and p_obs is None:
         res_W = solve_n_state_discrimination(
             n_x=n_x,
+            n_b=n_b,
             n_trunc=n_trunc,
             omega=omega,
             solver=solver,
@@ -661,6 +812,8 @@ n_x = 2
 n_trunc = 0
 #n_b_values = [2]
 n_b_values = [2, 4, 8]
+#mode = "shannon"
+mode = "min"
 
 #crea o entra nel path e salva la configutazione con tutte le info necessarie
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -677,8 +830,9 @@ with open(config_path, "w") as f:
     f.write(f"N_values = {N_values}\n")
     f.write(f"n_trunc_values = {n_trunc}\n")
     f.write(f"solver = MOSEK\n")
+    f.write(f"mode = {mode}\n")
     f.write(f"include_extra_words = True\n")
-    f.write(f"bpsk_level = True\n")
+    f.write(f"bpsk_level = False\n")
 
 
 rows = []
@@ -704,65 +858,78 @@ for n_b in n_b_values:
         elif n_b == 8:
             p_obs = bpsk_p_obs(alpha, n_b=8, x1=x1, x2=2*x1, x3=3*x1)  
 
-        res = solve_shannon_entropy_bff_randomness(
-            n_x=2,
-            n_b=n_b,
-            n_trunc=n_trunc,
-            omega=omega,
-            p_obs=p_obs,
-            W_obs=None,
-            x_star=0,
-            solver="MOSEK",
-            include_extra_words=True,
-            bpsk_level=True,
-            m=4, 
-            verbose=False,
-        )
+        if mode == "shannon":
+            res = solve_shannon_entropy_bff_randomness(
+                n_x=2,
+                n_b=n_b,
+                n_trunc=n_trunc,
+                omega=omega,
+                p_obs=p_obs,
+                W_obs=None,
+                x_star=0,
+                solver="MOSEK",
+                include_extra_words=True,
+                bpsk_level=False,
+                m=4, 
+                verbose=False,
+            )
 
-        H_values.append(res["H_shannon_bits"])
+            runtime = time.perf_counter() - t0
 
-        runtime = time.perf_counter() - t0
-        '''
-        print(
-            f"n_b={n_b:2d} | N={N:.4f} | "
-            f"H={res['H_shannon_bits']:.8f} | "
-            f"status={res['statuses']}"
-        )
-        '''
-        rows.append({
-            "N": float(N),
-            "n_x": n_x,
-            "n_b": n_b,
-            "n_trunc": n_trunc,
+            rows.append({
+                "N": float(N),
+                "n_x": n_x,
+                "n_b": n_b,
+                "n_trunc": n_trunc,
 
-            "p_obs": str(p_obs.tolist()),
-            "statuses": str(res["statuses"]),
-            "H_shannon_bits": res["H_shannon_bits"],
-            
-            "c_m": res["c_m"],
-            "m_eff": res["m_eff"],
+                "p_obs": str(p_obs.tolist()),
+                "statuses": str(res["statuses"]),
+                "H_shannon_bits": res["H_shannon_bits"],
+                
+                "c_m": res["c_m"],
+                "m_eff": res["m_eff"],
 
-            "runtime_sec": runtime,
-            "num_constraints_per_node": str(res["num_constraints_per_node"]),
-            "num_words": res["num_words"],
+                "runtime_sec": runtime,
+                "num_constraints_per_node": str(res["num_constraints_per_node"]),
+                "num_words": res["num_words"],
 
-            "node_values": str(res["node_values"]),
-        })
-        pd.DataFrame(rows).to_csv(csv_path, index=False)
+                "node_values": str(res["node_values"]),
+            })
+            pd.DataFrame(rows).to_csv(csv_path, index=False)
 
-    #results[n_b] = np.array(H_values)
+        if mode == "min":
+            res = solve_min_entropy_randomness(
+                n_x=2,
+                n_b=n_b,
+                n_trunc=n_trunc,
+                omega=omega,
+                p_obs=p_obs,
+                W_obs=None,
+                x_star=0,
+                solver="MOSEK",
+                include_extra_words=True,
+                bpsk_level=False,
+                verbose=False,
+            )
 
-'''
-for n_b in n_b_values:
-    plt.plot(N_values, results[n_b], "-", label=f"{n_b} bins")
+            runtime = time.perf_counter() - t0
 
-plt.xlabel(r"$|\alpha|^2$")
-plt.ylabel("Randomness")
-plt.title("BPSK protocol - Shannon entropy")
-plt.xlim(N_values.min(), N_values.max())
-plt.ylim(bottom=0)
-plt.grid(True, alpha=0.3)
-plt.legend()
-plt.tight_layout()
-plt.show()
-'''
+            rows.append({
+                "N": float(N),
+                "n_x": n_x,
+                "n_b": n_b,
+                "n_trunc": n_trunc,
+
+                "p_obs": str(p_obs.tolist()),
+                "pg": res["guessing_probability_clipped"],
+                
+                "status": str(res["status"]),
+                "H_min_bits": res["H_min_bits"],
+                "runtime_sec": runtime,
+                "num_constraints": res["num_constraints"],
+                "num_blocks": res["num_blocks"],
+                "num_words_per_block": res["num_words_per_block"],
+            })
+            pd.DataFrame(rows).to_csv(csv_path, index=False)
+
+
