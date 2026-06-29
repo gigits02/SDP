@@ -182,6 +182,19 @@ def build_localizing_words(n_x, n_trunc):
 
     return words
 
+
+def build_completeness_words(loc_words, rhos, measurements, sigmas):
+    completeness_words = loc_words + [(r, M) for r in rhos for M in measurements] + [(r, s) for r in rhos for s in sigmas] + [(s, M) for s in sigmas for M in measurements]
+    tmp = []
+    seen = set()
+    for u in completeness_words:
+        u = reduce_word(tuple(u))
+        if not is_zero_word(u) and u not in seen:
+            seen.add(u)
+            tmp.append(u)
+
+    return tmp
+
 def solve_n_state_discrimination(n_x, n_trunc, omega, solver="CLARABEL", verbose=False, include_extra_words=True):
     """
     Risolve un rilassamento SDP per discriminazione di n_x stati
@@ -193,7 +206,7 @@ def solve_n_state_discrimination(n_x, n_trunc, omega, solver="CLARABEL", verbose
 
     words = build_words(n_x, n_trunc, include_extra=include_extra_words)
     loc_words = build_localizing_words(n_x, n_trunc)
-
+    completeness_words = build_completeness_words(loc_words, rhos, measurements, sigmas)
     Gamma = sdp.moment_matrix(words)
     constraints = [Gamma >> 0]
 
@@ -218,8 +231,8 @@ def solve_n_state_discrimination(n_x, n_trunc, omega, solver="CLARABEL", verbose
 
     # Completezza della POVM: sum_b M_b = I
     # sum_b Tr(u^dagger M_b v) = Tr(u^dagger v)
-    for u in loc_words:
-        for v in loc_words:
+    for u in completeness_words:
+        for v in completeness_words:
 
             lhs = sum(
                 sdp.T(tuple(reversed(u)) + (M,) + tuple(v))
@@ -429,6 +442,7 @@ def solve_shannon_entropy_bff_randomness(
     rhos, measurements, sigmas = build_operators(n_x, n_trunc)
     words = build_words(n_x, n_trunc, include_extra=include_extra_words)
     loc_words = build_localizing_words(n_x, n_trunc)
+    completeness_words = build_completeness_words(loc_words, rhos, measurements, sigmas)
     photon_lb = 1.0 - omega
 
     H_total = c_m
@@ -458,8 +472,8 @@ def solve_shannon_entropy_bff_randomness(
             constraints.append(base.T((s,)) == 1)
 
         # Completezza POVM: sum_b M_b = I, imposta sui monomi localizing.
-        for u in loc_words:
-            for v in loc_words:
+        for u in completeness_words:
+            for v in completeness_words:
                 lhs = cvx_sum(
                     base.T(tuple(reversed(u)) + (M,) + tuple(v))
                     for M in measurements
@@ -508,8 +522,8 @@ def solve_shannon_entropy_bff_randomness(
                 constraints.append(block.HT((s,)) == block.h_scalar)
 
             # Completezza delle POVM anche nei layer Z e Z^2.
-            for u in loc_words:
-                for v in loc_words:
+            for u in completeness_words:
+                for v in completeness_words:
                     lhs_z = cvx_sum(
                         block.ZT(tuple(reversed(u)) + (M,) + tuple(v))
                         for M in measurements
@@ -584,9 +598,9 @@ def solve_shannon_entropy_bff_randomness(
 # MAIN
 # =========================
 
-#N_values = [0.005, 0.1, 0.2, 0.5]
+#N_values = [0.5, 0.7, 0.9]
 N_values = np.linspace(0.01, 1.0, 10)
-n_x = 2
+n_x = 4
 n_trunc_values = [0,1,2]
 mode = "witness"
 #mode = "full_distribution"
@@ -603,13 +617,13 @@ csv_path = outdir / "shannon_results.csv"
 config_path = outdir / "shannon_config.txt"
 
 with open(config_path, "w") as f:
-    f.write(f"script = shannonGlobal.py\n")
+    f.write(f"script = shannon.py\n")
     f.write(f"n_x = {n_x}\n")
     f.write(f"N_values = {N_values}\n")
     f.write(f"n_trunc_values = {n_trunc_values}\n")
     f.write(f"solver = MOSEK\n")
     f.write(f"mode = {mode}\n")
-    f.write(f"include_extra_words = False\n")
+    f.write(f"completeness words, include_extra_words = True")
 
 
 rows = []
@@ -630,7 +644,7 @@ for n_trunc in n_trunc_values:
                 n_trunc=n_trunc,
                 omega=omega,
                 solver="MOSEK",
-                include_extra_words=False,
+                include_extra_words=True,
             )
             W_obs = res_W["sdp_upper_bound"]
 
@@ -643,7 +657,7 @@ for n_trunc in n_trunc_values:
                 x_star=0,
                 m=4,
                 solver="MOSEK",
-                include_extra_words=False,
+                include_extra_words=True,
                 W_tol=1e-5,
             )
 
@@ -666,7 +680,7 @@ for n_trunc in n_trunc_values:
                 x_star=0,
                 m=8,
                 solver="MOSEK",
-                include_extra_words=False,
+                include_extra_words=True,
                 W_tol=1e-5,
             )
 

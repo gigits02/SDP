@@ -812,8 +812,8 @@ n_x = 2
 n_trunc = 0
 #n_b_values = [2]
 n_b_values = [2, 4, 8]
-#mode = "shannon"
-mode = "min"
+mode = "shannon"
+#mode = "min"
 
 #crea o entra nel path e salva la configutazione con tutte le info necessarie
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
