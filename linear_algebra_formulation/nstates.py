@@ -154,7 +154,7 @@ def build_localizing_words(n_x, n_trunc):
 def build_completeness_words(n_x, n_trunc, mode="loc"):
     """
     mode='loc': usa le stesse parole della localizing matrix.
-    mode='extended': aggiunge parole più aggressive.
+    mode='extended': aggiunge parole più forti.
     """
     rhos, measurements, sigmas = build_operators(n_x, n_trunc)
 
@@ -308,7 +308,6 @@ def collect_symbolic_model(n_x, n_trunc, include_extra=False, completeness_mode=
     for u in completeness_words:
         for v in completeness_words:
             row = {}
-
             for M in measurements:
                 add_entry_to_row(row, basis, dagger_word(u) + (M,) + tuple(v), +1.0)
 

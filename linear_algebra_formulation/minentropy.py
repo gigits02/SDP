@@ -154,7 +154,7 @@ def build_localizing_words(n_x, n_trunc):
 def build_completeness_words(n_x, n_trunc, mode="loc"):
     """
     mode='loc': usa le stesse parole della localizing matrix.
-    mode='extended': aggiunge parole piu' aggressive.
+    mode='extended': aggiunge parole piu' forti.
     """
     rhos, measurements, sigmas = build_operators(n_x, n_trunc)
 
@@ -193,21 +193,15 @@ class MomentBasis:
 
         return self.word_to_idx[key]
 
-    def idx(self, w):
-        """Restituisce l'indice se la parola e' gia' nella base; non aggiunge nuove parole."""
-        key = canonical_word(w)
-        if key is None:
-            return None
-        return self.word_to_idx.get(key, None)
-
     def __len__(self):
         return len(self.idx_to_word)
 
 
 def add_entry_to_row(row, basis, w, coeff):
     """
-    Aggiunge coeff * alpha[idx(w)] a una riga sparsa rappresentata da row.
-    Se la parola e' nulla, non fa nulla.
+    Funzione che crea l'algebra per lavorare sui coefficienti del vettore di base dei momenti.
+    'Row' è un dizionario che associa indici di parola canonica a coefficienti:
+    se l'indice non è presente, il coefficiente è 0, se l'indice è presente, i coefficienti si sommano.
     """
     idx = basis.add(w)
     if idx is None:
@@ -218,22 +212,14 @@ def add_entry_to_row(row, basis, w, coeff):
 
 
 def dense_row_from_dict(row_dict, d):
-    """Converte una riga sparsa {indice: coefficiente} in un array denso lungo d."""
+    """
+    Questa funzione serve perché bisogna passare a CVXPY un array. Dunque dal dizionario row_dict,
+    che rappresenta una riga sparsa (indice parola canonica -> coefficiente),
+    si costruisce un array denso di dimensione d.
+    """
     row = np.zeros(d)
     for k, v in row_dict.items():
         row[k] += v
-    return row
-
-
-def dense_row_for_word(basis, w, d, coeff=1.0):
-    """
-    Crea una riga densa per coeff * Tr(w), assumendo che la base sia gia' completa.
-    Non aggiunge nuove parole: se la parola non esiste o e' nulla, restituisce zero.
-    """
-    row = np.zeros(d)
-    idx = basis.idx(w)
-    if idx is not None:
-        row[idx] = float(coeff)
     return row
 
 
@@ -281,12 +267,7 @@ def matrix_indices_from_words(basis, row_words, middle=()):
     return K
 
 
-def collect_symbolic_model(
-    n_x,
-    n_trunc,
-    include_extra=False,
-    completeness_mode="loc",
-):
+def collect_symbolic_model(n_x, n_trunc, include_extra=False, completeness_mode="loc"):
     """
     Costruisce la rappresentazione algebrica del modello simbolico
     per l'SDP di min-entropy.
@@ -338,7 +319,6 @@ def collect_symbolic_model(
     for u in completeness_words:
         for v in completeness_words:
             row = {}
-
             for M in measurements:
                 add_entry_to_row(row, basis, dagger_word(u) + (M,) + tuple(v), +1.0,)
             add_entry_to_row(row, basis, dagger_word(u) + tuple(v), -1.0,)
@@ -349,7 +329,6 @@ def collect_symbolic_model(
 
     # 5) Photon rows: Tr(rho_x sigma_n)
     photon_rows_sparse = []
-
     for x, r in enumerate(rhos):
         for n, s in enumerate(sigmas):
             row = {}
@@ -358,7 +337,6 @@ def collect_symbolic_model(
 
     # 6) Probability rows: Tr(rho_x M_b)
     probability_rows_sparse = {}
-
     for x, r in enumerate(rhos):
         for b, M in enumerate(measurements):
             row = {}
@@ -369,9 +347,7 @@ def collect_symbolic_model(
     d = len(basis)
 
     rho_norm_rows = {r: dense_row_from_dict(row, d) for r, row in rho_norm_sparse.items()}
-
     sigma_norm_rows = {s: dense_row_from_dict(row, d) for s, row in sigma_norm_sparse.items()}
-
     completeness_Aeq = (np.vstack([dense_row_from_dict(row, d) for row in completeness_rows]) if completeness_rows else np.zeros((0, d)))
 
     photon_rows = []
@@ -405,8 +381,8 @@ def collect_symbolic_model(
 # CVXPY EXPRESSIONS FROM INDEX MATRICES
 # =========================
 
-def _scalar_as_block(x):
-    """Converte uno scalare/Expression CVXPY in un blocco 1x1 per cp.bmat."""
+def scalar_as_block(x):
+    """Converte uno scalare CVXPY in un blocco 1x1 per cp.bmat."""
     if isinstance(x, (int, float, np.number)):
         return cp.Constant([[float(x)]])
     return cp.reshape(x, (1, 1), order="F")
@@ -424,9 +400,9 @@ def expr_from_index_matrix(K, alpha_expr):
         for j in range(K.shape[1]):
             k = int(K[i, j])
             if k < 0:
-                row.append(_scalar_as_block(0.0))
+                row.append(scalar_as_block(0.0))
             else:
-                row.append(_scalar_as_block(alpha_expr[k]))
+                row.append(scalar_as_block(alpha_expr[k]))
         rows.append(row)
     return cp.bmat(rows)
 
@@ -493,7 +469,7 @@ def solve_min_entropy(
 
     Linearizing trick l=b:
     - un blocco alpha_l per ogni hidden variable lambda=l=b, cioe' per ogni possibile outcome;
-    - una variabile q_l >= 0 per ogni blocco;
+    - una variabile q_l >= 0 \sum_l q_l == 1 per ogni blocco;
     - normalizzazioni pesate: Tr_l(rho_x)=q_l e Tr_l(sigma_n)=q_l;
     - completezza POVM omogenea in ogni blocco;
     - vincoli fotonici medi sulla somma dei blocchi;
@@ -508,14 +484,14 @@ def solve_min_entropy(
         if p_obs.shape != (n_x, n_x):
             raise ValueError(f"p_obs deve avere shape {(n_x, n_x)}, ricevuta {p_obs.shape}")
 
-    print(f"Preparo il modello simbolico...")
+    #print(f"Preparo il modello simbolico...")
     model = collect_symbolic_model(
         n_x=n_x,
         n_trunc=n_trunc,
         include_extra=include_extra,
         completeness_mode=completeness_mode,
     )
-    print(f"FATTO")
+    #print(f"FATTO")
 
     d = len(model.basis)
     n_blocks = n_x
@@ -529,46 +505,47 @@ def solve_min_entropy(
 
     # Un blocco SDP per ogni lambda=l.
     for l, alpha_l in enumerate(alpha_blocks):
-        print(f"Aggiungendo i constraint 'Gamma_{l} >> 0'...")
+        
+        #print(f"Aggiungendo i constraint 'Gamma_{l} >> 0'...")
         Gamma_l = expr_from_index_matrix(model.Gamma_idx, alpha_l)
         constraints.append(Gamma_l >> psd_tol * np.eye(nG))
-        print(f"FATTO")
+        #print(f"FATTO")
 
-        print(f"Aggiungendo i constraint 'localizing_{l} >> 0'...")
+        #print(f"Aggiungendo i constraint 'localizing_{l} >> 0'...")
         for r in model.rhos:
             Lr_l = localizing_expr(model, r, alpha_l)
             constraints.append(Lr_l >> psd_tol * np.eye(nL))
-            print(f"FATTO")
+        #print(f"FATTO")
 
-        print(f"Aggiungendo i constraint normalizzazioni pesate...")
+        #print(f"Aggiungendo i constraint normalizzazioni pesate...")
         # Normalizzazioni pesate: Tr_l(rho_x)=q_l, Tr_l(sigma_n)=q_l.
         for r in model.rhos:
             constraints.append(model.rho_norm_rows[r] @ alpha_l == q[l])
         for s in model.sigmas:
             constraints.append(model.sigma_norm_rows[s] @ alpha_l == q[l])
-        print(f"FATTO")
+        #print(f"FATTO")
 
-        print(f"Aggiungendo i constraint completezza POVMs...")
+        #print(f"Aggiungendo i constraint completezza POVMs...")
         # Completezza POVM nel blocco lambda: solo parte omogenea.
         if model.completeness_Aeq.shape[0] > 0:
             constraints.append(model.completeness_Aeq @ alpha_l == 0)
-        print(f"FATTO")
+        #print(f"FATTO")
 
-    print(f"Aggiungendo i constraint sulla normalizzazione di q...")
+    #print(f"Aggiungendo i constraint sulla normalizzazione di q...")
     # Distribuzione classica delle hidden variables.
     constraints.append(cp.sum(q) == 1)
-    print(f"FATTO")
+    #print(f"FATTO")
 
-    print(f"Aggiungendo i photon constraint...")
+    #print(f"Aggiungendo i photon constraint...")
     # Vincoli fotonici medi: somma sui blocchi lambda.
     photon_lb = 1.0 - omega
     for x, n, row in model.photon_rows:
         mean_photon_expr = cvx_sum(row @ alpha_l for alpha_l in alpha_blocks)
         constraints.append(mean_photon_expr >= photon_lb[x, n])
         constraints.append(mean_photon_expr <= 1.0)
-    print(f"FATTO")
+    #print(f"FATTO")
 
-    print(f"Aggiungendo constraint sulla witness/statisiche...")
+    #print(f"Aggiungendo constraint sulla witness/statisiche...")
     # Dati osservati: distribuzione completa p(b|x), se data.
     if p_obs is not None:
         for x in range(n_x):
@@ -589,19 +566,17 @@ def solve_min_entropy(
     
     if W_obs is not None:
         constraints.append(W_total >= W_obs - tol)
-    print(f"FATTO")
+    #print(f"FATTO")
 
-    print(f"Preparando l'obiettivo...")
+    #print(f"Preparando l'obiettivo...")
     # Guessing probability: lambda=l prova a indovinare outcome b=l.
-    pg = cvx_sum(
-        model.probability_rows[(x_star, l)] @ alpha_blocks[l]
-        for l in range(n_blocks)
-    )
-    print(f"FATTO")
-    print(f"Risolvendo l' SDP...")
+    pg = cvx_sum(model.probability_rows[(x_star, l)] @ alpha_blocks[l] for l in range(n_blocks))
+    #print(f"FATTO")
+
+    #print(f"Risolvendo l' SDP...")
     problem = cp.Problem(cp.Maximize(pg), constraints)
     problem.solve(solver=solver, verbose=verbose)
-    print(f"FATTO")
+    #print(f"FATTO")
 
     pg_value = problem.value
     if problem.status not in ("optimal", "optimal_inaccurate") or pg_value is None or pg_value <= 0:
