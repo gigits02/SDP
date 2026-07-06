@@ -259,7 +259,7 @@ def poisson_omega(N, n_x, n_trunc):
 
 #N_values = [0.005, 0.1, 0.2, 0.5]
 N_values = np.linspace(0.01, 1.0, 10)
-n_x = 2
+n_x = 4
 n_trunc_values = [0,1,2]
 
 #plt.figure(figsize=(7, 5))

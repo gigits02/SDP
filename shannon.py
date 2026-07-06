@@ -381,7 +381,6 @@ def solve_shannon_entropy_bff_randomness(
 
     Convenzioni:
       - scenario n-state discrimination: n_x stati e n_x outcome;
-      - una sola measurement y=0, quindi M_b := M_{b|0};
       - omega[x,n] = 1 - P_n(x), quindi Tr(rho_x sigma_n) >= 1-omega[x,n];
       - se p_obs e' dato, viene fissata tutta la distribuzione p(b|x),
       altrimenti si fissa il witness W >= W_obs - tol.
