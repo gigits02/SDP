@@ -1,4 +1,2 @@
 .env
-/linear_algebra_formulation/results
-/linear_algebra_formulation/shannon2sparse.py
-/linear_algebra_formulation/shannon.py
+linear_algebra_formulation/
