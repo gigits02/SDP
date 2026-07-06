@@ -10,6 +10,7 @@ from datetime import datetime
 # ========================
 # WORD REDUCTION FUNCTIONS
 # ========================
+
 def reduce_word(w):
     """
     Riduce una parola usando idempotenza di POVM proiettive e sigma_n.
@@ -101,6 +102,7 @@ def dagger_word(w):
 # =========================
 # OPERATOR/WORDS BUILDING FUNCTIONS
 # =========================
+
 def build_operators(n_x, n_trunc):
     rhos = [f"r{x}" for x in range(n_x)]
     measurements = [f"M{b}" for b in range(n_x)]
@@ -170,7 +172,7 @@ def build_completeness_words(n_x, n_trunc, mode="loc"):
 
 
 # =========================
-# MOMENT BASIS: class that keeps track of canonical words and their indices
+# MOMENT BASIS
 # =========================
 class MomentBasis:
     """
@@ -196,11 +198,9 @@ class MomentBasis:
 
 def add_entry_to_row(row, basis, w, coeff):
     """
-    Aggiunge coeff * alpha[idx(w)] a una riga sparsa rappresentata da row.
-    Se la parola è nulla, non fa nulla.
-    Row è un dizionario che associa indici di parola canonica a coefficienti:
+    Funzione che crea l'algebra per lavorare sui coefficienti del vettore di base dei momenti.
+    'Row' è un dizionario che associa indici di parola canonica a coefficienti:
     se l'indice non è presente, il coefficiente è 0, se l'indice è presente, i coefficienti si sommano.
-    Servirà per la costruzione delle matrici dei vincoli, prima sparse e poi dense per CVXPY.
     """
     idx = basis.add(w)
     if idx is None:
@@ -212,8 +212,9 @@ def add_entry_to_row(row, basis, w, coeff):
 
 def dense_row_from_dict(row_dict, d):
     """
-    Questa funzione serve perché bisogna passare a CVXPY un array. Dunque dal dizionario row_dict, che rappresenta una riga sparsa,
-    (indice parola canonica -> coefficiente), si costruisce un array denso di dimensione d.
+    Questa funzione serve perché bisogna passare a CVXPY un array. Dunque dal dizionario row_dict,
+    che rappresenta una riga sparsa (indice parola canonica -> coefficiente),
+    si costruisce un array denso di dimensione d.
     """
     row = np.zeros(d)
     for k, v in row_dict.items():
@@ -222,7 +223,7 @@ def dense_row_from_dict(row_dict, d):
 
 
 # =========================
-# SYMBOLIC MODEL: COLLECTING ALL THE CANONICAL MOMENTS AND THEIR INDICES
+# SYMBOLIC MODEL
 # ========================
 
 @dataclass #Per non scrivere il costruttore
@@ -264,12 +265,7 @@ def matrix_indices_from_words(basis, row_words, middle=()):
     return K
 
 
-def collect_symbolic_model(
-    n_x,
-    n_trunc,
-    include_extra=False,
-    completeness_mode="loc",
-):
+def collect_symbolic_model(n_x, n_trunc, include_extra=False, completeness_mode="loc"):
     rhos, measurements, sigmas = build_operators(n_x, n_trunc)
     words = build_words(n_x, n_trunc, include_extra=include_extra)
     loc_words = build_localizing_words(n_x, n_trunc)
@@ -371,7 +367,7 @@ def collect_symbolic_model(
 
 
 # =========================
-# CVXPY EXPRESSIONS FROM INDEX MATRICES (ASSIGNING ALPHA VARIABLES TO MOMENT AND LOCALIZING MATRIX)
+# CVXPY EXPRESSIONS 
 # =========================
 
 def expr_from_index_matrix(K, alpha_expr):
@@ -439,23 +435,21 @@ def solve_discrimination_witness(
     """
     omega = np.asarray(omega, dtype=float)
     assert omega.shape == (n_x, n_trunc + 1)
-    print(f"Preparo il modello simbolico...")
-    model = collect_symbolic_model(
-        n_x=n_x,
-        n_trunc=n_trunc,
-        include_extra=include_extra,
-        completeness_mode=completeness_mode,
-    )
-    print(f"FATTO")
+    
+    #print(f"Preparo il modello simbolico...")
+    model = collect_symbolic_model(n_x=n_x, n_trunc=n_trunc, include_extra=include_extra, completeness_mode=completeness_mode)
+    #print(f"FATTO")
+    
     d = len(model.basis)
     constraints = []
 
     alpha = cp.Variable(d, name="alpha")
     alpha_expr = alpha
-    print(f"Aggiungendo i constraint 'model.Aeq @ alpha == model.beq'...")
+    
+    #print(f"Aggiungendo i constraint 'model.Aeq @ alpha == model.beq'...")
     if model.Aeq.shape[0] > 0:
         constraints.append(model.Aeq @ alpha == model.beq)
-    print(f"FATTO")
+    #print(f"FATTO")
 
     info = {
         "eliminated": False,
@@ -466,31 +460,35 @@ def solve_discrimination_witness(
     }
 
     # PSD Gamma
-    print(f"Aggiungendo i constraint 'Gamma >> 0'...")
+    #print(f"Aggiungendo i constraint 'Gamma >> 0'...")
     Gamma = expr_from_index_matrix(model.Gamma_idx, alpha_expr)
     nG = len(model.words)
     constraints.append(Gamma >> psd_tol * np.eye(nG))
-    print(f"FATTO")
-    print(f"Aggiungendo i constraint 'localizing >> 0'...")
+    #print(f"FATTO")
+    
+    #print(f"Aggiungendo i constraint 'localizing >> 0'...")
     # PSD localizing matrices
     for r in model.rhos:
         Lr = localizing_expr(model, r, alpha_expr)
         nL = len(model.loc_words)
         constraints.append(Lr >> psd_tol * np.eye(nL))
-    print(f"FATTO")
-    print(f"Aggiungendo i photon constraint...")
+    #print(f"FATTO")
+    
+    #print(f"Aggiungendo i photon constraint...")
     # Photon constraints
     for x, n, row in model.photon_rows:
         constraints.append(row @ alpha_expr >= 1.0 - omega[x, n])
         constraints.append(row @ alpha_expr <= 1.0)
-    print(f"FATTO")
-    print(f"Preparando l'obiettivo...")
+    #print(f"FATTO")
+    
+    #print(f"Preparando l'obiettivo...")
     objective = model.objective_row @ alpha_expr
-    print(f"FATTO")
-    print(f"Risolvendo l' SDP...")
+    #print(f"FATTO")
+    
+    #print(f"Risolvendo l' SDP...")
     problem = cp.Problem(cp.Maximize(objective), constraints)
     problem.solve(solver=solver, verbose=verbose)
-    print(f"FATTO")
+    #print(f"FATTO")
 
     alpha_value = None
     if problem.status in ("optimal", "optimal_inaccurate"):
@@ -525,7 +523,7 @@ n_trunc_values = [0,1,2]
 
 # False uses words until level k=2 full, True extends the set over partial words of lenght 3, namely (r, M, s) and (M, r, s) for all r, M, s.
 include_extra_words = True
-# "extended" if you want to use the completeness constraints over the extended set of words, "loc" for the localizing set of words
+# "extended" if you want to use the completeness constraints over the extended set of words, "loc" for the localizing set of words.
 completeness_mode = "loc" 
 eliminate_equalities = False
 
