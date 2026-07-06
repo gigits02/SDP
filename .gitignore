@@ -1,6 +1,5 @@
 .env
-prove/prova1.py
-prove/prova2.py
-prove/prova3.py
-graphs/prova.png
-graphs/prova2.png
+./linear_algebra_formulation/results
+./linear_algebra_formulation/shannon2.py
+./linear_algebra_formulation/shannon2sparse.py
+./linear_algebra_formulation/shannon.py
